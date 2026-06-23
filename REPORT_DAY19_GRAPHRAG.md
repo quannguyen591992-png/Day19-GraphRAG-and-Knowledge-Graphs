@@ -287,7 +287,42 @@ Graph build bằng rule-based extractor chạy khoảng 0.44 giây trên máy lo
 
 ---
 
-## 8. Kết luận
+## 8. Chạy với Gemini API tùy chọn
+
+Script hiện hỗ trợ gọi Gemini để tạo phần `Gemini synthesis` cho câu trả lời GraphRAG. Đây là chế độ tùy chọn; nếu không bật Gemini, bài vẫn chạy offline như cũ.
+
+Cách cấu hình:
+
+1. Mở file `.env` trong thư mục project.
+2. Thay dòng sau bằng key thật của anh:
+
+```text
+GEMINI_API_KEY=PASTE_YOUR_GEMINI_API_KEY_HERE
+```
+
+3. Bật Gemini:
+
+```text
+USE_GEMINI=true
+```
+
+4. Cài thư viện Gemini nếu chưa có:
+
+```bash
+python -m pip install google-generativeai
+```
+
+5. Chạy lại:
+
+```bash
+python day19_graphrag_lab.py
+```
+
+Lưu ý bảo mật: không push API key thật lên GitHub. File `.env` đã được đưa vào `.gitignore`; repo chỉ nên push `.env.example`.
+
+---
+
+## 9. Kết luận
 
 Bài lab đã được làm lại bằng dataset thật gồm 70 documents. Hệ thống hoàn thành đầy đủ pipeline GraphRAG:
 

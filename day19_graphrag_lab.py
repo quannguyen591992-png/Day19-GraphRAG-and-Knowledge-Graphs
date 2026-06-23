@@ -14,6 +14,7 @@ Output:
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from collections import Counter, deque
@@ -36,6 +37,27 @@ except NameError:
 DATASET_DIR = OUTPUT_DIR / "dataset"
 GRAPH_IMAGE = OUTPUT_DIR / "graphrag_knowledge_graph.png"
 BENCHMARK_CSV = OUTPUT_DIR / "benchmark_results.csv"
+ENV_PATH = OUTPUT_DIR / ".env"
+
+
+def load_env(env_path: Path = ENV_PATH) -> None:
+    """Load simple KEY=VALUE pairs from .env without requiring python-dotenv."""
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+load_env()
+USE_GEMINI = os.getenv("USE_GEMINI", "false").lower() in {"1", "true", "yes", "y"}
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
 
 
 @dataclass(frozen=True)
@@ -454,6 +476,31 @@ def graph_rag_query(question: str, graph: nx.MultiDiGraph, max_hops: int = 2) ->
     return {"answer": answer, "entities": seeds, "context": "\n".join(evidence)}
 
 
+def gemini_answer(question: str, evidence: str) -> str:
+    """Optionally synthesize a short answer with Gemini when USE_GEMINI=true."""
+    if not USE_GEMINI:
+        return ""
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "PASTE_YOUR_GEMINI_API_KEY_HERE":
+        return "[Gemini skipped: GEMINI_API_KEY is not set in .env]"
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        return "[Gemini skipped: install google-generativeai first]"
+
+    prompt = (
+        "You are answering a GraphRAG lab question using only the evidence below. "
+        "Answer concisely in 2-4 sentences. If evidence is insufficient, say so.\n\n"
+        f"Question: {question}\n\nEvidence:\n{evidence[:5000]}"
+    )
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel(GEMINI_MODEL)
+        response = model.generate_content(prompt)
+        return (getattr(response, "text", "") or "").strip()
+    except Exception as exc:
+        return f"[Gemini error: {exc}]"
+
+
 def coverage_score(text: str, entities: list[str]) -> float:
     if not entities:
         return 0.0
@@ -473,8 +520,10 @@ def evaluate_benchmark(graph: nx.MultiDiGraph, corpus: list[dict]) -> pd.DataFra
     for i, item in enumerate(BENCHMARK_QUESTIONS, 1):
         flat = flat_rag_query(item["question"], docs, vectorizer, matrix)
         gr = graph_rag_query(item["question"], graph)
+        gemini = gemini_answer(item["question"], gr["context"] or gr["answer"])
+        final_graph_answer = f"{gr['answer']}\n\nGemini synthesis: {gemini}" if gemini else gr["answer"]
         flat_score = coverage_score(flat["answer"], item["entities"])
-        graph_score = coverage_score(gr["answer"], item["entities"])
+        graph_score = coverage_score(final_graph_answer, item["entities"])
         if graph_score > flat_score:
             winner = "GraphRAG"
             notes = "GraphRAG nối được nhiều entity/quan hệ qua graph 2-hop hơn Flat RAG."
@@ -490,7 +539,7 @@ def evaluate_benchmark(graph: nx.MultiDiGraph, corpus: list[dict]) -> pd.DataFra
             "expected_answer": item["expected"],
             "flat_rag_answer": flat["answer"],
             "flat_coverage": round(flat_score, 2),
-            "graphrag_answer": gr["answer"],
+            "graphrag_answer": final_graph_answer,
             "graphrag_coverage": round(graph_score, 2),
             "winner": winner,
             "notes": notes,
